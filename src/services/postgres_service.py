@@ -1,6 +1,6 @@
 from typing import List, Optional, Type, TypeVar, Generic
 from uuid import UUID
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from models.base_entity import Base
@@ -32,6 +32,36 @@ class PostgresService(Generic[T]):
             result = await session.execute(query)
             return result.scalars().all()
         return []
+
+    async def get_by_user_and_company(self, session: AsyncSession, user_id: str, company_id: UUID) -> Optional[T]:
+        """Check if a user has access to a specific company (UserCompany lookup)"""
+        if hasattr(self.model, 'user_id') and hasattr(self.model, 'company_id'):
+            query = select(self.model).where(
+                and_(
+                    self.model.user_id == user_id,
+                    self.model.company_id == company_id
+                )
+            )
+            result = await session.execute(query)
+            return result.scalar_one_or_none()
+        return None
+
+    async def get_by_any_user_identity_and_company(
+        self, session: AsyncSession, identities: list[str], company_id: UUID
+    ) -> Optional[T]:
+        """
+        Check if a user has access to a company by trying multiple identity values
+        (e.g. sub, email, nameid). Returns the first match found.
+        """
+        if hasattr(self.model, 'user_id') and hasattr(self.model, 'company_id'):
+            from sqlalchemy import or_
+            conditions = or_(*[self.model.user_id == identity for identity in identities if identity])
+            query = select(self.model).where(
+                and_(conditions, self.model.company_id == company_id)
+            )
+            result = await session.execute(query)
+            return result.scalar_one_or_none()
+        return None
     
     # Sync versions
     def get_all_sync(self, session: Session, skip: int = 0, limit: int = 100) -> List[T]:
